@@ -36,7 +36,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 
 ### dtmm settings ###
-from ML_DTMM_dtmm_settings import *
+from ML_DTMM_dtmm_settings import * # specific separate file for all dtmm simulations etc
 
 
 
