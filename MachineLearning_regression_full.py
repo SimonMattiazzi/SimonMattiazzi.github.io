@@ -2,9 +2,23 @@
 """
 Created on Thu May 16 12:26:24 2024
 
-Initial machine learning stuff 
+This is the first attempt to build a regression neural network
+that would be able to determine the sizes and concentrations
+of nanoparticles in a solution based on the characteristic
+dependence of autocorrelation function amplitude on the
+scattering vector as measured with c-DDM.
 
-@author: PolarBear2017
+First, a Pandas dataframe with limited experimental data is loaded,
+then, a lot of additional data is crated artificially, based on distribution
+of experimental amplitudes for each combination of size and concentration.
+(to be replaced with a numerical simulation once it is working properly)
+
+This data is then used for training the regressional neural network.
+
+At the end, some quick analysis is presented.
+Overall, the results seem good.
+
+@author: Simon Mattiazzi
 """
 
 import tensorflow as tf
@@ -31,8 +45,8 @@ plt.rcParams.update({"figure.dpi":150,
                      "grid.linestyle": ":",})
 
 
-# dataframe settings:
-#----------------------------#
+# pandas dataframe settings:
+#----------------------------------------------------------------------------#
 # actual NA values:
 NA_dict = {"NA_1": 0.098,
            "NA_2": 0.146,
@@ -53,6 +67,10 @@ filepath = "D:\\Users Data\\Simon\\Electrophoresis experiments\\Full_results_lib
 full_results_library = pd.read_pickle(filepath)
 k = np.load("D:\\Users Data\\Simon\\Electrophoresis experiments\\Test_concentrations\\196_nm\\NA_1\\1_1\\run_0\\k.npy")[3:]
 
+#----------------------------------------------------------------------------#
+
+
+# Function definitions:
 
 def get_entry(dataframe, size, concentration, NA):
     """
@@ -114,8 +132,8 @@ def create_training_data(size_nm, conc_num, NA_num, N_rep, cutoff=None, plot=Fal
     --------
     out_arr_mag : numpy.ndarray
         Used for x_train data. A 2D numpy array containing the modified amplitude data with magnitude information.
-    sizes : numpy.ndarray
-        Used for y_train data. A 1D numpy array with constant size_nm values, corresponding to the length of out_arr_mag.
+    labels_arr : numpy.ndarray
+        Used for y_train data. A 1D numpy array with constant (size_nm, conc_num) values, corresponding to the length of out_arr_mag.
     """
     norm = 1# NA_num**2 * conc_N_ml(conc_num, size_nm)
     
@@ -135,13 +153,12 @@ def create_training_data(size_nm, conc_num, NA_num, N_rep, cutoff=None, plot=Fal
 
     out_arr = np.empty((0, amplitudes.shape[1]))
     
-    # first: get stdev
+    # Get st. dev
     yerr=np.nanstd(amplitudes, axis=0) / norm
 
-    # first: interpolate NaN values and store to out
+    # Interpolate NaN values and store to out
     amplitudes = np.array([interpolate_nans(arr) for arr in amplitudes])
     out_arr = np.append(out_arr, amplitudes, axis=0)
-    
          
     # Generate N_rep modified arrays with normal distributed variations
     modified_arrays = np.array([
@@ -151,14 +168,12 @@ def create_training_data(size_nm, conc_num, NA_num, N_rep, cutoff=None, plot=Fal
         for array_run in amplitudes
     ])
     
-
     # Reshape modified_arrays and append to out_arr
     modified_arrays = modified_arrays.reshape(-1, amplitudes.shape[1])
     out_arr = np.append(out_arr, modified_arrays, axis=0)
     
-    # add magnitude information:
+    # Add magnitude information:
     magnitudes = np.array([np.max(array) for array in out_arr])
-    
     out_arr_mag = np.array([np.concatenate((
         np.ones(len(out_arr[0])) * np.log(magnitudes[i])/30, arr/magnitudes[i]))
         for i, arr in enumerate(out_arr)])
@@ -177,19 +192,24 @@ def create_training_data(size_nm, conc_num, NA_num, N_rep, cutoff=None, plot=Fal
     
     labels_arr = np.concatenate((np.ones((len(out_arr),1)) * size_nm, np.ones((len(out_arr),1)) * conc_num), axis=1)
     
-    return(out_arr_mag, labels_arr) # for now we leave constant concentrations
-    #NP.ONES ker je za cel array vseh umetno ustvarjenih
-#y: [[196, 1_1], [295, 1_4] ...]
-
-#----------------------------#
+    return(out_arr_mag, labels_arr)
 
 
-# create training and test data:
-NREP = 100 # number of repetitions in creating data
+def scheduler(epoch, lr):
+    if epoch < 10:
+        return lr
+    else:
+        return lr * 0.5
+
+
+#----------------------------------------------------------------------------#
+# CREATE TRAINING AND TEST DATA:
+    
+NREP = 10000 # number of repetitions in creating data
 
 learn_data_x, learn_data_y = None, None # will be initialized with the first appropriate array
 
-# create training data:
+# Create training data:
 for size_nm in [196, 295, 508]:   
     for conc_str in ["1_1", "1_2", "1_4", "1_8", "1_16", "1_32"]:
         
@@ -199,7 +219,7 @@ for size_nm in [196, 295, 508]:
             if training_data != None:
                 learn_data_x, learn_data_y = training_data
                 
-        # all others:
+        # append all others:
         else:
             training_data = create_training_data(size_nm, conc_dict_mg_ml[conc_str], NA_dict["NA_5"], N_rep=NREP, cutoff=80, plot=False)
             if training_data != None:
@@ -209,29 +229,8 @@ for size_nm in [196, 295, 508]:
                 learn_data_y = np.append(learn_data_y, learn_data_i_y, axis=0)
 
 
-
-
-
-
-
-# # create training data:
-# for i, size_nm in enumerate([196, 295, 508]):   
-#     for j, conc_str in enumerate(["1_1", "1_2", "1_4", "1_8", "1_16", "1_32"]):
-#         if i == 0 and j == 0: # initialize array with the first element, we don't yet know the dimensions.
-#             learn_data_x, learn_data_y = create_training_data(size_nm, conc_dict_mg_ml[conc_str], NA_dict["NA_5"], N_rep=NREP, cutoff=80, plot=False)
-#         else:
-#             training_data = create_training_data(size_nm, conc_dict_mg_ml[conc_str], NA_dict["NA_5"], N_rep=NREP, cutoff=80, plot=False)
-#             if training_data != None:
-#                 learn_data_i_x, learn_data_i_y = training_data
-#                 learn_data_x = np.append(learn_data_x, learn_data_i_x, axis=0)
-#                 learn_data_y = np.append(learn_data_y, learn_data_i_y, axis=0)
-
-
 # Shuffle data:
-# Generate a random permutation
 permutation = np.random.permutation(len(learn_data_x))
-
-# Shuffle both arrays using the same permutation
 learn_data_x = learn_data_x[permutation]
 learn_data_y = learn_data_y[permutation]
 
@@ -243,33 +242,80 @@ y_train = learn_data_y [:int(len(learn_data_x)*0.9)]
 x_test = learn_data_x [int(len(learn_data_x)*0.9):]
 y_test = learn_data_y [int(len(learn_data_x)*0.9):]
 
-
+# Checks
 print("nans in train", np.isnan(x_train).sum())  # Check for NaNs
 print("infs in train", np.isinf(x_train).sum())  # Check for infinities
 print("nans in labels", np.isnan(y_train).sum())  # Check for NaNs in labels
 print("infs in labels", np.isinf(y_train).sum())  # Check for infinities in labels
 print("class balance", np.unique(y_train, return_counts=True))  # Check for class balance
 
-
-
-# extra bits:___________________________________________
-    
-# Define learning rate scheduler
-def scheduler(epoch, lr):
-    if epoch < 10:
-        return lr
-    else:
-        return lr * 0.5
-
+# Define additional neural network parameters:
 lr_scheduler = LearningRateScheduler(scheduler)
-
-# Define early stopping
 early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
-# ______________________________________________________________
+# Build a neural network (this architecture seems to work best):
+model = Sequential([
+    Input(shape=(len(x_train[0]),)),
+    Dense(512, activation='leaky_relu'),
+    Dense(256, activation='leaky_relu'),
+    Dense(128, activation='leaky_relu'),
+    Dense(64, activation='leaky_relu'),
+    Dense(2, activation="linear") # because 2 params
+])
+
+# Compile the model:
+model.compile(optimizer=Adam(learning_rate=0.001), loss='mean_squared_error', metrics=['mean_absolute_error'])
+
+# Train the model:
+history=model.fit(x_train, y_train, epochs=50, batch_size=64, validation_split=0.2, callbacks=[early_stopping, lr_scheduler])
+
+# Evaluate the model:
+loss, mae = model.evaluate(x_test, y_test)
+print(f'Test mae: {mae}')
+
+# Summary to visualize the model
+#model.summary()
+
+# Plot training & validation Mean Absolute Error values:
+plt.plot(history.history['mean_absolute_error'])
+plt.plot(history.history['val_mean_absolute_error'])
+plt.title('Model Mean Absolute Error')
+plt.ylabel('Mean Absolute Error')
+plt.xlabel('Epoch')
+plt.legend(['Train', 'Validation'], loc='upper left')
+plt.show()
+
+# Plot training & validation loss values
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model loss')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.legend(['Train', 'Validation'], loc='upper left')
+plt.show()
 
 
-### GRID SEARCH ###-------------------------------------------
+np.set_printoptions(suppress=True, precision=2) # numpy number print without scientific format
+
+# Quick visual test:
+plt.figure()
+for i in range(10):
+    print(model.predict(x_test[i].reshape(1, -1))[0])
+    prediction = model.predict(x_test[i].reshape(1, -1))[0] # 2D because batch predictions
+    plt.plot(x_test[i], label="predicted " + str(prediction) + ", label " + str(y_test[i]))
+plt.legend()
+
+# Quick test: random point "in-between"
+plt.figure()
+for i in range(3):
+    prediction = model.predict((x_test[i]/2+x_test[i+1]/2).reshape(1, -1))[0] # 2D because batch predictions
+    plt.plot(x_test[i]/2+x_test[i+1]/2, label="predicted " + str(prediction) + ", label " + str(y_test[i]) + " + "+str(y_test[i+1]))
+plt.legend()
+
+
+# to do: don't include one concentration in training data, but include it in testing data.
+
+# ---------------------GRID SEARCH-------------------------------------------
 
 # def build_model(optimizer='adam'):
 #     model = Sequential([
@@ -292,65 +338,3 @@ early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_wei
 # Best: nan using {'batch_size': 32, 'epochs': 20, 'optimizer': 'adam'}
 
 #----------------------------------------------------------------#
-
-
-
-model = Sequential([
-    Input(shape=(len(x_train[0]),)),
-    Dense(512, activation='leaky_relu'),
-    Dense(256, activation='leaky_relu'),
-    Dense(128, activation='leaky_relu'),
-    Dense(64, activation='leaky_relu'),
-    Dense(2, activation="linear") # because 2 params
-])
-
-# Compile the model
-model.compile(optimizer=Adam(learning_rate=0.001), loss='mean_squared_error', metrics=['mean_absolute_error'])
-
-
-# Train the model
-history=model.fit(x_train, y_train, epochs=50, batch_size=64, validation_split=0.2, callbacks=[early_stopping, lr_scheduler])
-
-# Evaluate the model
-loss, mae = model.evaluate(x_test, y_test)
-print(f'Test mae: {mae}')
-
-# Summary to visualize the model
-#model.summary()
-
-# Plot training & validation Mean Absolute Error values
-plt.plot(history.history['mean_absolute_error'])
-plt.plot(history.history['val_mean_absolute_error'])
-plt.title('Model Mean Absolute Error')
-plt.ylabel('Mean Absolute Error')
-plt.xlabel('Epoch')
-plt.legend(['Train', 'Validation'], loc='upper left')
-plt.show()
-
-
-# Plot training & validation loss values
-plt.plot(history.history['loss'])
-plt.plot(history.history['val_loss'])
-plt.title('Model loss')
-plt.ylabel('Loss')
-plt.xlabel('Epoch')
-plt.legend(['Train', 'Validation'], loc='upper left')
-plt.show()
-
-
-np.set_printoptions(suppress=True, precision=2)
-
-# Quick visual test:
-plt.figure()
-for i in range(10):
-    print(model.predict(x_test[i].reshape(1, -1))[0])
-    prediction = model.predict(x_test[i].reshape(1, -1))[0] # 2D because batch predictions
-    plt.plot(x_test[i], label="predicted " + str(prediction) + ", label " + str(y_test[i]))
-plt.legend()
-
-# random in between point
-plt.figure()
-for i in range(3):
-    prediction = model.predict((x_test[i]/2+x_test[i+1]/2).reshape(1, -1))[0] # 2D because batch predictions
-    plt.plot(x_test[i]/2+x_test[i+1]/2, label="predicted " + str(prediction) + ", label " + str(y_test[i]) + " + "+str(y_test[i+1]))
-plt.legend()
