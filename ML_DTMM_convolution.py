@@ -184,7 +184,7 @@ plt.plot([y_test[:, param_index].min(), y_test[:, param_index].max()],
          color='red', linestyle='--', linewidth=2, label='Perfect Prediction')
 plt.xlabel('Actual')
 plt.ylabel('Predicted')
-plt.title(f'Actual vs. Predicted Parameter Intensity')
+plt.title(f'Actual vs. Predicted  Intensity')
 plt.legend()
 plt.grid(True)
 plt.show()
@@ -198,7 +198,7 @@ plt.plot([y_test[:, param_index].min(), y_test[:, param_index].max()],
          color='red', linestyle='--', linewidth=2, label='Perfect Prediction')
 plt.xlabel('Actual')
 plt.ylabel('Predicted')
-plt.title(f'Actual vs. Predicted Parameter Dfactor')
+plt.title(f'Actual vs. Predicted  Dfactor')
 plt.legend()
 plt.grid(True)
 plt.show()
@@ -212,7 +212,7 @@ plt.plot([y_test[:, param_index].min(), y_test[:, param_index].max()],
          color='red', linestyle='--', linewidth=2, label='Perfect Prediction')
 plt.xlabel('Actual')
 plt.ylabel('Predicted')
-plt.title(f'Actual vs. Predicted Parameter Twist')
+plt.title(f'Actual vs. Predicted  Twist')
 plt.legend()
 plt.grid(True)
 plt.show()
@@ -226,11 +226,56 @@ plt.plot([y_test[:, param_index].min(), y_test[:, param_index].max()],
          color='red', linestyle='--', linewidth=2, label='Perfect Prediction')
 plt.xlabel('Actual')
 plt.ylabel('Predicted')
-plt.title(f'Actual vs. Predicted Parameter Ksi')
+plt.title(f'Actual vs. Predicted  Ksi')
 plt.legend()
 plt.grid(True)
 plt.show()
 
 
 # feed experimental data to check results:
+import glob
+
+
+def pixelate(img, resolution):
+    height, width, _ = img.shape
+    
+    # Calculate the block size
+    block_height = height // resolution
+    block_width = width // resolution
+    
+    # Resize the image to the desired resolution
+    resized_img = resize(img, (block_height * resolution, block_width * resolution), preserve_range=False)
+    new_img = np.zeros((resolution, resolution,3))
+
+    # Iterate over each block
+    for i in range(0, block_height * resolution, block_height):
+        for j in range(0, block_width * resolution, block_width):
+            # Calculate the average color of the block
+            avg_color = np.mean(resized_img[i:i+block_height, j:j+block_width], axis=(0, 1))#.astype(np.uint8)
+            # Set the pixels in the block to the average color
+            new_img[int(i/block_height), int(j/block_height)] = avg_color
+            #print(new_img[int(i/block_height), int(j/block_height)])
+    #new_img = downscale_local_mean(img,(resolution,resolution))
+    return new_img
+
+
+fnames = sorted(glob.glob("dtmm_measurement_2/dtmm2*.JPG"))#[::3]
+raws = [plt.imread(fname) for fname in sorted(fnames)]
+
+I,J = 990-20,2710-20
+DI,DJ = 610+40,610+40
+
+images = []
+
+for im in raws:
+    im = im[I:I+DI,J:J+DJ]
+    images.append(im)
+    #plt.figure()
+    #plt.imshow(im)
+    
+cimages = []
+
+for i,im in enumerate(images):
+    im = pixelate(im/255., resolution=16)
+    cimages.append(im)
     
