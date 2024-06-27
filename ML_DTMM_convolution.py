@@ -26,7 +26,7 @@ import numpy as np
 import itertools
 import matplotlib.pyplot as plt
 import time
-
+import glob
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, InputLayer, TimeDistributed
@@ -35,6 +35,12 @@ from tensorflow.keras.losses import MeanSquaredError
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
+from matplotlib import cm
+from matplotlib.colors import Normalize
+import datetime
+
+# timestamp:
+timestamp = str(datetime.datetime.now()).replace(":", ".")[:-10]
 
 ### dtmm settings ###
 from ML_DTMM_dtmm_settings import *
@@ -44,11 +50,16 @@ plt.rcParams.update({"figure.dpi":150,
                      "grid.color": "grey",
                      "grid.linestyle": ":",})
 
+
 ### Data preparation ###
 
+
+FILENAME = "test1"
+SAVEFOLDER= "D:\\Users Data\\Simon\\MachineLearning\\saved_data\\"
+
 # label generation settings:
-NSTEPS_EACH_PAR = 6 # number of steps in each of the parameters range 
-NVAR = 2 # number of slight Gaussian variations of input params for each parameter set
+NSTEPS_EACH_PAR = 10 # number of steps in each of the parameters range 
+NVAR = 4 # number of slight Gaussian variations of input params for each parameter set
 SIGMA_PERCENTAGE = 0.001
 N_PARAMS = 4
 
@@ -72,80 +83,104 @@ twist_arr = np.linspace(twist_min, twist_max, NSTEPS_EACH_PAR) # max mid-plane t
 ksi_arr = np.linspace(ksi_min, ksi_max, NSTEPS_EACH_PAR) # the ksi constant - see :funf:`ampl`
 
 # Create all parameter combinations:
-combinations = itertools.product(intensity_arr, dfactor_arr, twist_arr, ksi_arr)
-labels_arr = np.empty((NSTEPS_EACH_PAR**N_PARAMS * NVAR, N_PARAMS)) * 0
-
-# Iterate through all parameter combinations and create their normal
-# distributed variations:
-i=-1
-for intensity, dfactor, twist, ksi in combinations:
-    for n in range(NVAR): # number of variations:
-        i += 1
-        # pick from a normal distribution:
-        intensity_i = np.random.normal(intensity, (intensity_max - intensity_min) * SIGMA_PERCENTAGE)
-        dfactor_i = np.random.normal(dfactor, (dfactor_max - dfactor_min) * SIGMA_PERCENTAGE)
-        twist_i = np.random.normal(twist, (twist_max - twist_min) * SIGMA_PERCENTAGE)
-        ksi_i = np.random.normal(ksi, (ksi_max - ksi_min) * SIGMA_PERCENTAGE)
-        # save to array of labels:
-        labels_arr[i] = np.array([intensity_i, dfactor_i, twist_i, ksi_i])
-
-# 2. DATA: 
-
-#PARAMS = np.asarray([INTENSITY,DFACTOR,TWIST,KSI])
-# calculated:[1.29855351 0.87267592 0.19353709 5.5987824 ]
-images_arr = np.empty((len(labels_arr), len(experiment_configurations), SHAPE[1], SHAPE[2], 3))
-for i, label in tqdm(enumerate(labels_arr),total=len(labels_arr),ncols=100):
-    # Simulate an array of images for every label:
-    images = calculate_images(*label, exp_config=experiment_configurations)
-    # images shape = (18, 11, 11, 3)
-    images_arr[i] = images
-      
-# 3. Final data adjustments:
-
-# # random permutation:
-# # Shuffle data:
-# permutation = np.random.permutation(len(labels_arr))
-# learn_data_x = images_arr[permutation]
-# learn_data_y = labels_arr[permutation]
     
-# # first 90% = train
-# x_train = learn_data_x [:int(len(learn_data_x)*0.9)]
-# y_train = learn_data_y [:int(len(learn_data_x)*0.9)]
+    
+def generate_labels():
+    combinations = itertools.product(intensity_arr, dfactor_arr, twist_arr, ksi_arr)
+    labels_arr = np.empty((NSTEPS_EACH_PAR**N_PARAMS * NVAR, N_PARAMS)) * 0
+    
+    # Iterate through all parameter combinations and create their normal
+    # distributed variations:
+    i=-1
+    for intensity, dfactor, twist, ksi in combinations:
+        for n in range(NVAR): # number of variations:
+            i += 1
+            # pick from a normal distribution:
+            intensity_i = np.random.normal(intensity, (intensity_max - intensity_min) * SIGMA_PERCENTAGE)
+            dfactor_i = np.random.normal(dfactor, (dfactor_max - dfactor_min) * SIGMA_PERCENTAGE)
+            twist_i = np.random.normal(twist, (twist_max - twist_min) * SIGMA_PERCENTAGE)
+            ksi_i = np.random.normal(ksi, (ksi_max - ksi_min) * SIGMA_PERCENTAGE)
+            # save to array of labels:
+            labels_arr[i] = np.array([intensity_i, dfactor_i, twist_i, ksi_i])
+    np.save(f"{SAVEFOLDER}labels_arr{FILENAME}.npy", labels_arr)
+    return labels_arr
+#PARAMS = np.asarray([INTENSITY,DFACTOR,TWIST,KSI])
 
-# # last 10% = test
-# x_test = learn_data_x [int(len(learn_data_x)*0.9):]
-# y_test = learn_data_y [int(len(learn_data_x)*0.9):]
 
-#shuffling and splitting:
-x_train, x_test, y_train, y_test = train_test_split(images_arr, labels_arr, shuffle=True, test_size=0.2, random_state=42)
+def generate_data():
+    images_arr = np.empty((len(labels_arr), len(experiment_configurations), SHAPE[1], SHAPE[2], 3))
+    for i, label in tqdm(enumerate(labels_arr),total=len(labels_arr),ncols=100):
+        # Simulate an array of images for every label:
+        images = calculate_images(*label, exp_config=experiment_configurations)
+        # images shape = (18, 11, 11, 3)
+        images_arr[i] = images
+    np.save(f"{SAVEFOLDER}images_arr{FILENAME}.npy", images_arr)
+    return images_arr
+        
 
-
-# 4. CNN:
 
 # Define the CNN model for regression of 4 parameters
-cnn_model = Sequential([
-    InputLayer(shape=(len(experiment_configurations), SHAPE[1], SHAPE[2], 3)),  # Input shape: 18 images of size 16x16 with 3 channels
-    TimeDistributed(Conv2D(16, (3, 3), activation='relu')),
-    TimeDistributed(MaxPooling2D((2, 2))),
-    TimeDistributed(Conv2D(32, (3, 3), activation='relu')),
-    TimeDistributed(MaxPooling2D((2, 2))),
-    TimeDistributed(Flatten()),
-    Flatten(),
-    Dense(128, activation='relu'),
-    Dense(4)  # Output layer for 4 parameters (no activation for regression)
-])
+def build_model():
+    cnn_model = Sequential([
+        InputLayer(shape=(len(experiment_configurations), SHAPE[1], SHAPE[2], 3)),  # Input shape: 18 images of size 16x16 with 3 channels
+        TimeDistributed(Conv2D(16, (3, 3), activation='relu')),
+        TimeDistributed(MaxPooling2D((2, 2))),
+        TimeDistributed(Conv2D(32, (3, 3), activation='relu')),
+        TimeDistributed(MaxPooling2D((2, 2))),
+        TimeDistributed(Flatten()),
+        Flatten(),
+        Dense(128, activation='relu'),
+        Dense(4)  # Output layer for 4 parameters (no activation for regression)
+    ])
+    
+    # Compile the model
+    cnn_model.compile(optimizer=Adam(),
+                      loss=MeanSquaredError(),
+                      metrics=["mean_absolute_error"])
+    
+    return cnn_model
 
-# conv3D instead of conv2D for 
 
-# Compile the model
-cnn_model.compile(optimizer=Adam(),
-                  loss=MeanSquaredError(),
-                  metrics=["mean_absolute_error"])
+#############################################################
 
-# Train the model
-history = cnn_model.fit(x_train, y_train, epochs=10, batch_size=32, validation_data=(x_test, y_test))
+
+# OPTION A: BUILD FROM SCRATCH:
+labels_arr = generate_labels()
+images_arr = generate_data()
+x_train, x_test, y_train, y_test = train_test_split(images_arr, labels_arr, shuffle=True, test_size=0.2, random_state=42)
+
+cnn_model = build_model()
+
+# Train the model:
+history = cnn_model.fit(x_train, y_train, epochs=40, batch_size=32, validation_data=(x_test, y_test))
+np.save(f"{SAVEFOLDER}history_{FILENAME}.npy", history)
+
+# Save the entire model as a `.keras` zip archive.
+cnn_model.save(f'{SAVEFOLDER}cnn_model_{FILENAME}.keras')
+    
+
+
+# OPTION B: LOAD
+# labels_arr = np.load(f"{SAVEFOLDER}labels_arr{FILENAME}.npy")
+# images_arr = np.load(f"{SAVEFOLDER}images_arr{FILENAME}.npy")
+# x_train, x_test, y_train, y_test = train_test_split(images_arr, labels_arr, shuffle=True, test_size=0.2, random_state=42)
+
+# # Reload a fresh Keras model from the .keras zip archive:
+# cnn_model = tf.keras.models.load_model(f'cnn_model_{FILENAME}.keras')
+# history = np.load(f"history_{FILENAME}.npy", allow_pickle=True).item()
+
+
+
+
+
+
 
 ############# testing ##################
+
+
+
+
+
 
 
 # Plot training & validation Mean Absolute Error values:
@@ -170,112 +205,158 @@ plt.show()
 
 # Predict on test data
 y_pred = cnn_model.predict(x_test)
-
 # Calculate MSE
 mse = mean_squared_error(y_test, y_pred)
 print(f"Mean Squared Error (MSE): {mse:.4f}")
 
-# Examples for one parameter
+
+# all 4 parameters pred + label:
+for i in range(5):
+    print("Predicted: ", y_pred[i])
+    print("Label: ", y_test[i])
+
+
+
+# HISTOGRAMS RELATIVE
+fig, axs = plt.subplots(2, 2)
+axs[0, 0].hist(y_pred[:,0]-y_test[:,0], bins=30)
+axs[0, 0].set_title("Intensity")
+axs[0, 1].hist(y_pred[:,1]-y_test[:,1], bins=30)
+axs[0, 1].set_title("Dfactor")
+axs[1, 0].hist(y_pred[:,2]-y_test[:,2], bins=30)
+axs[1, 0].set_title("Twist")
+axs[1, 1].hist(y_pred[:,3]-y_test[:,3], bins=30)
+axs[1, 1].set_title("Ksi")
+plt.show(fig)
+
+# HISTOGRAMS ABSOLUTE
+fig, axs = plt.subplots(2, 2)
+axs[0, 0].hist(y_pred[:,0], bins=100)
+axs[0, 0].set_title("Intensity")
+axs[0, 1].hist(y_pred[:,1], bins=100)
+axs[0, 1].set_title("Dfactor")
+axs[1, 0].hist(y_pred[:,2], bins=100)
+axs[1, 0].set_title("Twist")
+axs[1, 1].hist(y_pred[:,3], bins=100)
+axs[1, 1].set_title("Ksi")
+plt.show(fig)
+
+
+# EACH PARAMETER SEPARATELY:
+
+fig, axs = plt.subplots(2, 2)
+
+norm = Normalize(vmin=0, vmax=len(y_pred)-1)
+cmap = cm.get_cmap('viridis')
+colors = cmap(norm(range(len(y_pred))))
+slicing = 500
+
 param_index = 0  # Index of the parameter to plot
-plt.figure(figsize=(8, 6))
-plt.scatter(y_test[:, param_index], y_pred[:, param_index], color='blue', label='Predicted vs. Actual')
-plt.plot([y_test[:, param_index].min(), y_test[:, param_index].max()], 
+axs[0,0].scatter(y_test[::slicing, param_index], y_pred[::slicing, param_index], c=colors[::slicing], label='Predicted / Actual')
+axs[0,0].plot([y_test[:, param_index].min(), y_test[:, param_index].max()], 
          [y_test[:, param_index].min(), y_test[:, param_index].max()], 
          color='red', linestyle='--', linewidth=2, label='Perfect Prediction')
-plt.xlabel('Actual')
-plt.ylabel('Predicted')
-plt.title(f'Actual vs. Predicted  Intensity')
-plt.legend()
-plt.grid(True)
-plt.show()
+axs[0,0].set_xlabel('Actual')
+axs[0,0].set_ylabel('Predicted')
+axs[0,0].set_title("Intensity")
 
-# Examples for one parameter
 param_index = 1  # Index of the parameter to plot
-plt.figure(figsize=(8, 6))
-plt.scatter(y_test[:, param_index], y_pred[:, param_index], color='blue', label='Predicted vs. Actual')
-plt.plot([y_test[:, param_index].min(), y_test[:, param_index].max()], 
+axs[0,1].scatter(y_test[::slicing, param_index], y_pred[::slicing, param_index], c=colors[::slicing], label='Predicted / Actual')
+axs[0,1].plot([y_test[:, param_index].min(), y_test[:, param_index].max()], 
          [y_test[:, param_index].min(), y_test[:, param_index].max()], 
          color='red', linestyle='--', linewidth=2, label='Perfect Prediction')
-plt.xlabel('Actual')
-plt.ylabel('Predicted')
-plt.title(f'Actual vs. Predicted  Dfactor')
-plt.legend()
-plt.grid(True)
-plt.show()
+axs[0,1].set_xlabel('Actual')
+axs[0,1].set_ylabel('Predicted')
+axs[0,1].set_title("Dfactor")
 
-# Examples for one parameter
 param_index = 2  # Index of the parameter to plot
-plt.figure(figsize=(8, 6))
-plt.scatter(y_test[:, param_index], y_pred[:, param_index], color='blue', label='Predicted vs. Actual')
-plt.plot([y_test[:, param_index].min(), y_test[:, param_index].max()], 
+axs[1,0].scatter(y_test[::slicing, param_index], y_pred[::slicing, param_index], c=colors[::slicing],label='Predicted / Actual')
+axs[1,0].plot([y_test[:, param_index].min(), y_test[:, param_index].max()], 
          [y_test[:, param_index].min(), y_test[:, param_index].max()], 
          color='red', linestyle='--', linewidth=2, label='Perfect Prediction')
-plt.xlabel('Actual')
-plt.ylabel('Predicted')
-plt.title(f'Actual vs. Predicted  Twist')
-plt.legend()
-plt.grid(True)
-plt.show()
+axs[1,0].set_xlabel('Actual')
+axs[1,0].set_ylabel('Predicted')
+axs[1,0].set_title("Twist")
 
-# Examples for one parameter
 param_index = 3  # Index of the parameter to plot
-plt.figure(figsize=(8, 6))
-plt.scatter(y_test[:, param_index], y_pred[:, param_index], color='blue', label='Predicted vs. Actual')
-plt.plot([y_test[:, param_index].min(), y_test[:, param_index].max()], 
+axs[1,1].scatter(y_test[::slicing, param_index], y_pred[::slicing, param_index],c=colors[::slicing], label='Predicted / Actual')
+axs[1,1].plot([y_test[:, param_index].min(), y_test[:, param_index].max()], 
          [y_test[:, param_index].min(), y_test[:, param_index].max()], 
          color='red', linestyle='--', linewidth=2, label='Perfect Prediction')
-plt.xlabel('Actual')
-plt.ylabel('Predicted')
-plt.title(f'Actual vs. Predicted  Ksi')
+axs[1,1].set_xlabel('Actual')
+axs[1,1].set_ylabel('Predicted')
+axs[1,1].set_title("Ksi")
+
+
+plt.suptitle(f'Actual vs. Predicted  params, showing every {slicing}th element')
 plt.legend()
-plt.grid(True)
-plt.show()
+plt.show(fig)
 
 
-# feed experimental data to check results:
-import glob
+
+# KORELACIJE NAPAK:
+range1 = [[-0.1, 0.1],[-0.1, 0.1]]
+for i1 in [0,1,2,3]:
+    for i2 in [0,1,2,3]:
+        if i1 != i2 and i1 < i2:
+            plt.figure()
+            plt.title(f"Correlations relative errors params {i1} and {i2}" )
+            plt.hist2d((y_pred[:,i1]-y_test[:,i1])/y_test[:,i1], (y_pred[:,i2]-y_test[:,i2])/y_test[:,i2], bins=[10, 10], range=range1, cmap='grey')
+            plt.xlabel(f"err {i1}")
+            plt.ylabel(f"err {i2}")
+            plt.gca().set_aspect('equal', adjustable='box')
+            plt.show()
 
 
-def pixelate(img, resolution):
-    height, width, _ = img.shape
+
+
+
+
+
+# # feed experimental data to check results:
+
+# def pixelate(img, resolution):
+#     height, width, _ = img.shape
     
-    # Calculate the block size
-    block_height = height // resolution
-    block_width = width // resolution
+#     # Calculate the block size
+#     block_height = height // resolution
+#     block_width = width // resolution
     
-    # Resize the image to the desired resolution
-    resized_img = resize(img, (block_height * resolution, block_width * resolution), preserve_range=False)
-    new_img = np.zeros((resolution, resolution,3))
+#     # Resize the image to the desired resolution
+#     resized_img = resize(img, (block_height * resolution, block_width * resolution), preserve_range=False)
+#     new_img = np.zeros((resolution, resolution,3))
 
-    # Iterate over each block
-    for i in range(0, block_height * resolution, block_height):
-        for j in range(0, block_width * resolution, block_width):
-            # Calculate the average color of the block
-            avg_color = np.mean(resized_img[i:i+block_height, j:j+block_width], axis=(0, 1))#.astype(np.uint8)
-            # Set the pixels in the block to the average color
-            new_img[int(i/block_height), int(j/block_height)] = avg_color
-            #print(new_img[int(i/block_height), int(j/block_height)])
-    #new_img = downscale_local_mean(img,(resolution,resolution))
-    return new_img
+#     # Iterate over each block
+#     for i in range(0, block_height * resolution, block_height):
+#         for j in range(0, block_width * resolution, block_width):
+#             # Calculate the average color of the block
+#             avg_color = np.mean(resized_img[i:i+block_height, j:j+block_width], axis=(0, 1))#.astype(np.uint8)
+#             # Set the pixels in the block to the average color
+#             new_img[int(i/block_height), int(j/block_height)] = avg_color
+#             #print(new_img[int(i/block_height), int(j/block_height)])
+#     #new_img = downscale_local_mean(img,(resolution,resolution))
+#     return new_img
 
 
-fnames = sorted(glob.glob("dtmm_measurement_2/dtmm2*.JPG"))#[::3]
-raws = [plt.imread(fname) for fname in sorted(fnames)]
+# fnames = sorted(glob.glob("dtmm_measurement_2/dtmm2*.JPG"))#[::3]
+# raws = [plt.imread(fname) for fname in sorted(fnames)]
 
-I,J = 990-20,2710-20
-DI,DJ = 610+40,610+40
+# I,J = 990-20,2710-20
+# DI,DJ = 610+40,610+40
 
-images = []
+# images = []
 
-for im in raws:
-    im = im[I:I+DI,J:J+DJ]
-    images.append(im)
-    #plt.figure()
-    #plt.imshow(im)
+# for im in raws:
+#     im = im[I:I+DI,J:J+DJ]
+#     images.append(im)
+#     #plt.figure()
+#     #plt.imshow(im)
     
-cimages = []
+# cimages = []
 
-for i,im in enumerate(images):
-    im = pixelate(im/255., resolution=16)
-    cimages.append(im)
+# for i,im in enumerate(images):
+#     im = pixelate(im/255., resolution=16)
+#     cimages.append(im)
     
+
+# experimental_pred = cnn_model.predict(cimages)
