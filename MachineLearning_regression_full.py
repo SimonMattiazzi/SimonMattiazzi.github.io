@@ -36,6 +36,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.signal import savgol_filter
 from IPython import get_ipython
+from matplotlib import cm
+from matplotlib.colors import Normalize
 
 get_ipython().run_line_magic('matplotlib', 'inline') # inline plots
 
@@ -43,6 +45,10 @@ plt.rcParams.update({"figure.dpi":150,
                      "axes.grid":True,
                      "grid.color": "grey",
                      "grid.linestyle": ":",})
+
+
+SAVEFOLDER= "D:\\Users Data\\Simon\\MachineLearning\\saved_data\\"
+FILENAME = "test2"
 
 
 # pandas dataframe settings:
@@ -108,7 +114,7 @@ def interpolate_nans(array):
     return interpolated_array
 
 
-def create_training_data(size_nm, conc_num, NA_num, N_rep, cutoff=None, plot=False):
+def create_training_data_single(size_nm, conc_num, NA_num, N_rep, cutoff=None, plot=False):
     """
     Generates training data from measured data by creating several similar curves by adding appropriate noise.
     Data is normalized, but amplitude data is preserved by filling half (because of weight) of each array with constant log(amplitude)/30 value.
@@ -195,6 +201,40 @@ def create_training_data(size_nm, conc_num, NA_num, N_rep, cutoff=None, plot=Fal
     return(out_arr_mag, labels_arr)
 
 
+# Create training data:
+def create_training_data_full(nrep):
+    learn_data_x, learn_data_y = None, None # will be initialized with the first appropriate array
+    
+    for size_nm in [196, 295, 508]:   
+        for conc_str in ["1_1", "1_2", "1_4", "1_8", "1_16", "1_32"]:
+            
+            # initialize array with the first working element, dimensions currently unknown:
+            if learn_data_x is None: 
+                training_data = create_training_data_single(size_nm, conc_dict_mg_ml[conc_str], NA_dict["NA_5"], N_rep=NREP, cutoff=80, plot=False)
+                if training_data != None:
+                    learn_data_x, learn_data_y = training_data
+                    
+            # append all others:
+            else:
+                training_data = create_training_data_single(size_nm, conc_dict_mg_ml[conc_str], NA_dict["NA_5"], N_rep=NREP, cutoff=80, plot=False)
+                if training_data != None:
+                    learn_data_i_x, learn_data_i_y = training_data
+                    
+                    learn_data_x = np.append(learn_data_x, learn_data_i_x, axis=0)
+                    learn_data_y = np.append(learn_data_y, learn_data_i_y, axis=0)
+    
+    # Shuffle data:
+    permutation = np.random.permutation(len(learn_data_x))
+    learn_data_x = learn_data_x[permutation]
+    learn_data_y = learn_data_y[permutation]
+                
+    #save:
+    np.save(f"{SAVEFOLDER}reg_learn_data_x{FILENAME}.npy", learn_data_x)                
+    np.save(f"{SAVEFOLDER}reg_learn_data_y{FILENAME}.npy", learn_data_y)     
+    
+    return learn_data_x, learn_data_y
+
+
 def scheduler(epoch, lr):
     if epoch < 10:
         return lr
@@ -202,37 +242,35 @@ def scheduler(epoch, lr):
         return lr * 0.5
 
 
+# Build a neural network (this architecture seems to work best):
+def build_model():
+    model = Sequential([
+        Input(shape=(len(x_train[0]),)),
+        Dense(512, activation='leaky_relu'),
+        Dense(256, activation='leaky_relu'),
+        Dense(128, activation='leaky_relu'),
+        Dense(64, activation='leaky_relu'),
+        Dense(2, activation="linear") # because 2 params
+    ])
+    
+    # Compile the model:
+    model.compile(optimizer=Adam(learning_rate=0.001),
+                  loss='mean_squared_error',
+                  metrics=['mean_absolute_error'])
+    return model
+
+
 #----------------------------------------------------------------------------#
 # CREATE TRAINING AND TEST DATA:
     
-NREP = 10000 # number of repetitions in creating data
+NREP = 100000 # number of repetitions in creating data
+   
+# run:
+learn_data_x, learn_data_y = create_training_data_full(nrep=NREP)
 
-learn_data_x, learn_data_y = None, None # will be initialized with the first appropriate array
-
-# Create training data:
-for size_nm in [196, 295, 508]:   
-    for conc_str in ["1_1", "1_2", "1_4", "1_8", "1_16", "1_32"]:
-        
-        # initialize array with the first working element, dimensions currently unknown:
-        if learn_data_x is None: 
-            training_data = create_training_data(size_nm, conc_dict_mg_ml[conc_str], NA_dict["NA_5"], N_rep=NREP, cutoff=80, plot=False)
-            if training_data != None:
-                learn_data_x, learn_data_y = training_data
-                
-        # append all others:
-        else:
-            training_data = create_training_data(size_nm, conc_dict_mg_ml[conc_str], NA_dict["NA_5"], N_rep=NREP, cutoff=80, plot=False)
-            if training_data != None:
-                learn_data_i_x, learn_data_i_y = training_data
-                
-                learn_data_x = np.append(learn_data_x, learn_data_i_x, axis=0)
-                learn_data_y = np.append(learn_data_y, learn_data_i_y, axis=0)
-
-
-# Shuffle data:
-permutation = np.random.permutation(len(learn_data_x))
-learn_data_x = learn_data_x[permutation]
-learn_data_y = learn_data_y[permutation]
+# load:
+#learn_data_x = np.load(f"{SAVEFOLDER}reg_learn_data_x{FILENAME}.npy")
+#learn_data_y = np.load(f"{SAVEFOLDER}reg_learn_data_y{FILENAME}.npy")
 
 # first 90% = train
 x_train = learn_data_x [:int(len(learn_data_x)*0.9)]
@@ -253,28 +291,34 @@ print("class balance", np.unique(y_train, return_counts=True))  # Check for clas
 lr_scheduler = LearningRateScheduler(scheduler)
 early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
-# Build a neural network (this architecture seems to work best):
-model = Sequential([
-    Input(shape=(len(x_train[0]),)),
-    Dense(512, activation='leaky_relu'),
-    Dense(256, activation='leaky_relu'),
-    Dense(128, activation='leaky_relu'),
-    Dense(64, activation='leaky_relu'),
-    Dense(2, activation="linear") # because 2 params
-])
 
-# Compile the model:
-model.compile(optimizer=Adam(learning_rate=0.001), loss='mean_squared_error', metrics=['mean_absolute_error'])
+# BUILD AND TRAIN THE NEURAL NETWORK
+#------------------------------------------------------------------------#
+
+# build a model:
+model = build_model()
 
 # Train the model:
-history=model.fit(x_train, y_train, epochs=50, batch_size=64, validation_split=0.2, callbacks=[early_stopping, lr_scheduler])
+history = model.fit(x_train, y_train, epochs=50, batch_size=64, validation_split=0.2, callbacks=[early_stopping, lr_scheduler])
+
+# Save the entire model as a `.keras` zip archive.
+model.save(f'{SAVEFOLDER}reg_model{FILENAME}.keras')
+np.save(f"{SAVEFOLDER}reg_history_{FILENAME}.npy", history)
+
+# # Load a fresh Keras model from the .keras zip archive:
+#model = tf.keras.models.load_model(f'{SAVEFOLDER}reg_model{FILENAME}.keras')
+#history = np.load(f"{SAVEFOLDER}reg_history_{FILENAME}.npy", allow_pickle=True).item()
+
+
+# CHECKS
+#---------------------------------------------------------------------------#
 
 # Evaluate the model:
 loss, mae = model.evaluate(x_test, y_test)
 print(f'Test mae: {mae}')
 
 # Summary to visualize the model
-#model.summary()
+# model.summary()
 
 # Plot training & validation Mean Absolute Error values:
 plt.plot(history.history['mean_absolute_error'])
@@ -305,15 +349,106 @@ for i in range(10):
     plt.plot(x_test[i], label="predicted " + str(prediction) + ", label " + str(y_test[i]))
 plt.legend()
 
-# Quick test: random point "in-between"
-plt.figure()
-for i in range(3):
-    prediction = model.predict((x_test[i]/2+x_test[i+1]/2).reshape(1, -1))[0] # 2D because batch predictions
-    plt.plot(x_test[i]/2+x_test[i+1]/2, label="predicted " + str(prediction) + ", label " + str(y_test[i]) + " + "+str(y_test[i+1]))
+# Quick test: random point "in-between" (when trained on mixtures as well)
+# plt.figure()
+# for i in range(3):
+#     prediction = model.predict((x_test[i]/2+x_test[i+1]/2).reshape(1, -1))[0] # 2D because batch predictions
+#     plt.plot(x_test[i]/2+x_test[i+1]/2, label="predicted " + str(prediction) + ", label " + str(y_test[i]) + " + "+str(y_test[i+1]))
+# plt.title("mixture")
+# plt.legend()
+
+
+
+
+# Predict on test data
+y_pred = model.predict(x_test)
+
+
+# all parameters pred + label:
+for i in range(5):
+    print("Predicted: ", y_pred[i])
+    print("Label: ", y_test[i])
+
+
+# HISTOGRAMS RELATIVE
+fig, axs = plt.subplots(1, 2)
+
+axs[0].hist((y_pred[:,0]-y_test[:,0])/y_test[:,0], bins=30)
+axs[0].set_title("size")
+axs[1].hist((y_pred[:,1]-y_test[:,1])/y_test[:,1], bins=30)
+axs[1].set_title("conc")
+plt.show(fig)
+
+# HISTOGRAMS ABSOLUTE
+fig, axs = plt.subplots(1, 2)
+axs[0].hist(y_pred[:,0], bins=100)
+axs[0].set_title("size")
+axs[1].hist(y_pred[:,1], bins=100)
+axs[1].set_title("conc")
+
+plt.show(fig)
+
+
+# EACH PARAMETER SEPARATELY:
+
+fig, axs = plt.subplots(2, 1)
+
+norm = Normalize(vmin=0, vmax=len(y_pred)-1)
+cmap = cm.get_cmap('viridis')
+colors = cmap(norm(range(len(y_pred))))
+slicing = 50
+
+param_index = 0  # Index of the parameter to plot
+axs[0].scatter(y_test[::slicing, param_index], y_pred[::slicing, param_index], c=colors[::slicing], label='Predicted / Actual')
+axs[0].plot([y_test[:, param_index].min(), y_test[:, param_index].max()], 
+         [y_test[:, param_index].min(), y_test[:, param_index].max()], 
+         color='red', linestyle='--', linewidth=2, label='Perfect Prediction')
+axs[0].set_xlabel('Actual')
+axs[0].set_ylabel('Predicted')
+axs[0].set_title("size")
+
+param_index = 1  # Index of the parameter to plot
+axs[1].scatter(y_test[::slicing, param_index], y_pred[::slicing, param_index], c=colors[::slicing], label='Predicted / Actual')
+axs[1].plot([y_test[:, param_index].min(), y_test[:, param_index].max()], 
+         [y_test[:, param_index].min(), y_test[:, param_index].max()], 
+         color='red', linestyle='--', linewidth=2, label='Perfect Prediction')
+axs[1].set_xlabel('Actual')
+axs[1].set_ylabel('Predicted')
+axs[1].set_title("conc")
+
+plt.suptitle(f'Actual vs. Predicted  params, showing every {slicing}th element')
 plt.legend()
+plt.show(fig)
+
+
+# KORELACIJE NAPAK:
+range1 = [[-0.1, 0.1],[-0.1, 0.1]]
+for i1 in [0,1]:
+    for i2 in [0,1]:
+        if i1 != i2 and i1 < i2:
+            plt.figure()
+            plt.title(f"Correlations relative errors params {i1} and {i2}" )
+            plt.hist2d((y_pred[:,i1]-y_test[:,i1])/y_test[:,i1], (y_pred[:,i2]-y_test[:,i2])/y_test[:,i2], bins=[10, 10], range=range1, cmap='grey')
+            plt.xlabel(f"err {i1}")
+            plt.ylabel(f"err {i2}")
+            plt.gca().set_aspect('equal', adjustable='box')
+            plt.show()
+
+
+
+
 
 
 # to do: don't include one concentration in training data, but include it in testing data.
+
+
+
+
+
+
+
+
+
 
 # ---------------------GRID SEARCH-------------------------------------------
 
